@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sethgrid/pester"
 	flock "github.com/theckman/go-flock"
 )
 
@@ -32,9 +33,7 @@ type PreRequestCallback func(*http.Request) (*http.Request, error)
 type PostRequestCallback func(*http.Request, *http.Response) (*http.Response, error)
 
 type Client struct {
-	http.Client
-	backoff    BackoffStrategy
-	maxRetries int
+	pester.Client
 
 	preCallbacks  []PreRequestCallback
 	postCallbacks []PostRequestCallback
@@ -48,17 +47,54 @@ type Client struct {
 }
 
 func New() *Client {
-	return &Client{
-		maxRetries:           3,
-		handlingPostCallback: false,
+	c := &Client{
+		Client:               *pester.New(),
 		preCallbacks:         []PreRequestCallback{},
 		postCallbacks:        []PostRequestCallback{},
+		cookieFile:           "",
+		handlingPostCallback: false,
 		log:                  DefaultLogger,
+		traceCookies:         false,
+		traceRequestBody:     false,
+		traceResponseBody:    false,
 	}
+	c.Client.MaxRetries = 3
+	return c
+}
+
+func (c *Client) clone() *Client {
+	c.Lock()
+	defer c.Unlock()
+
+	copy := New()
+	copy.Transport = c.Transport
+	copy.CheckRedirect = c.CheckRedirect
+	copy.Jar = c.Jar
+	copy.Timeout = c.Timeout
+	copy.Concurrency = c.Concurrency
+	copy.MaxRetries = c.MaxRetries
+	copy.Backoff = c.Backoff
+	copy.KeepLog = c.KeepLog
+	copy.LogHook = c.LogHook
+	copy.ContextLogHook = c.ContextLogHook
+	copy.SuccessReqNum = c.SuccessReqNum
+	copy.SuccessRetryNum = c.SuccessRetryNum
+	copy.ErrLog = c.ErrLog
+	copy.RetryOnHTTP429 = c.RetryOnHTTP429
+	copy.preCallbacks = c.preCallbacks
+	copy.postCallbacks = c.postCallbacks
+	copy.cookieFile = c.cookieFile
+	copy.handlingPostCallback = c.handlingPostCallback
+	copy.log = c.log
+	copy.traceCookies = c.traceCookies
+	copy.traceRequestBody = c.traceRequestBody
+	copy.traceResponseBody = c.traceResponseBody
+
+	return copy
 }
 
 func (c *Client) WithCookieFile(file string) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.cookieFile = file
 	if cp.Jar != nil {
 		cp.Jar = nil
@@ -67,15 +103,15 @@ func (c *Client) WithCookieFile(file string) *Client {
 }
 
 func (c *Client) WithRetries(retries int) *Client {
-	cp := *c
+	cp := *c.clone()
 	// pester MaxRetries is really a MaxAttempts, so if you
 	// want 2 retries that means 3 attempts
-	cp.maxRetries = retries + 1
+	cp.MaxRetries = retries + 1
 	return &cp
 }
 
 func (c *Client) WithTimeout(duration time.Duration) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.Timeout = duration
 	return &cp
 }
@@ -88,38 +124,38 @@ const (
 	NO_BACKOFF       BackoffStrategy = iota
 )
 
-func (c *Client) WithBackoff(backoff BackoffStrategy) *Client {
-	cp := *c
-	cp.backoff = backoff
+func (c *Client) WithBackoff(backoff pester.BackoffStrategy) *Client {
+	cp := *c.clone()
+	cp.Backoff = backoff
 	return &cp
 }
 
 func (c *Client) WithTransport(transport http.RoundTripper) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.Transport = transport
 	return &cp
 }
 
 func (c *Client) WithPostCallback(callback PostRequestCallback) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.postCallbacks = append(cp.postCallbacks, callback)
 	return &cp
 }
 
 func (c *Client) WithoutPostCallbacks() *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.postCallbacks = []PostRequestCallback{}
 	return &cp
 }
 
 func (c *Client) WithPreCallback(callback PreRequestCallback) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.preCallbacks = append(cp.preCallbacks, callback)
 	return &cp
 }
 
 func (c *Client) WithoutPreCallbacks() *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.preCallbacks = []PreRequestCallback{}
 	return &cp
 }
@@ -133,7 +169,7 @@ func (c *Client) WithoutCallbacks() *Client {
 }
 
 func (c *Client) WithCheckRedirect(checkFunc func(*http.Request, []*http.Request) error) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.CheckRedirect = checkFunc
 	return &cp
 }
@@ -143,25 +179,25 @@ func (c *Client) WithoutRedirect() *Client {
 }
 
 func (c *Client) WithLogger(l Logger) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.log = l
 	return &cp
 }
 
 func (c *Client) WithRequestTrace(b bool) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.traceRequestBody = b
 	return &cp
 }
 
 func (c *Client) WithResponseTrace(b bool) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.traceResponseBody = b
 	return &cp
 }
 
 func (c *Client) WithTrace(b bool) *Client {
-	cp := *c
+	cp := *c.clone()
 	cp.traceRequestBody = b
 	cp.traceResponseBody = b
 	cp.traceCookies = b
@@ -289,7 +325,7 @@ func (c *Client) saveCookies(resp *http.Response) error {
 func (c *Client) loadCookies() ([]*http.Cookie, error) {
 	bytes, err := ioutil.ReadFile(c.cookieFile)
 	if err != nil && os.IsNotExist(err) {
-		// dont load cookies if the file does not exist
+		// don't load cookies if the file does not exist
 		return nil, nil
 	}
 	if err != nil {
@@ -330,7 +366,7 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 
 	// Callback may want to resubmit the request, so we
 	// will need to rewind (Seek) the Reader back to start.
-	if (c.maxRetries != 0 || (c.traceRequestBody || len(c.postCallbacks) > 0)) && req.Body != nil {
+	if (c.MaxRetries != 0 || (c.traceRequestBody || len(c.postCallbacks) > 0)) && req.Body != nil {
 		bites, err := ioutil.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
@@ -339,65 +375,28 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		req.Body = &bytesReaderCloser{*reader}
 	}
 
-	attempt := 1
-	for {
-		resp, err = c.Client.Do(req)
-		if err != nil {
-			if c.traceRequestBody {
-				rewindRequest(req)
-				out, _ := httputil.DumpRequestOut(req, true)
-				c.log.Printf("Request %d: %s", attempt, out)
-			}
-		} else {
-			// we log this after the request is made because http.send
-			// will modify the request to append cookies, so to see the
-			// cookies sent we need to log post-send.
-			if c.traceRequestBody {
-				rewindRequest(req)
-				out, _ := httputil.DumpRequestOut(req, true)
-				c.log.Printf("Request %d: %s", attempt, out)
-			}
-
-			if c.traceResponseBody {
-				out, _ := httputil.DumpResponse(resp, true)
-				c.log.Printf("Response %d: %s", attempt, out)
-			}
-		}
-
-		if err != nil || resp.StatusCode >= 500 {
-			if c.maxRetries < 0 || c.maxRetries < attempt+1 {
-				break
-			}
-
-			var idle time.Duration
-			if c.backoff == CONSTANT_BACKOFF {
-				idle = time.Duration(1 * time.Second)
-			} else if c.backoff == LINEAR_BACKOFF {
-				idle = time.Duration(attempt) * time.Second
-			}
-
-			if err != nil {
-				c.log.Printf("Attempt %d error: %s, retry in %s", attempt, err, idle)
-			} else {
-				c.log.Printf("Attempt %d failed: %s, retry in %s", attempt, resp.Status, idle)
-			}
-
-			select {
-			case <-req.Context().Done():
-				c.log.Printf("Request Context timeout after attempt %d", attempt)
-				return
-			case <-time.After(idle):
-			}
-
-			// need to reset body for the retry
+	resp, err = c.Client.Do(req)
+	if err != nil {
+		if c.traceRequestBody {
 			rewindRequest(req)
-
-			attempt++
-			continue
+			out, _ := httputil.DumpRequestOut(req, true)
+			c.log.Printf("Request error: %s", out)
 		}
-		break
-	}
+	} else {
+		// we log this after the request is made because http.send
+		// will modify the request to append cookies, so to see the
+		// cookies sent we need to log post-send.
+		if c.traceRequestBody {
+			rewindRequest(req)
+			out, _ := httputil.DumpRequestOut(req, true)
+			c.log.Printf("Request: %s", out)
+		}
 
+		if c.traceResponseBody {
+			out, _ := httputil.DumpResponse(resp, true)
+			c.log.Printf("Response: %s", out)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

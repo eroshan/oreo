@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sethgrid/pester"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -234,7 +235,7 @@ func TestOreoWithLinearTimeout(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := New().WithTrace(true).WithTimeout(1 * time.Second).WithBackoff(LINEAR_BACKOFF).WithRetries(2)
+	c := New().WithTrace(true).WithTimeout(1 * time.Second).WithBackoff(pester.LinearBackoff).WithRetries(2)
 
 	start := time.Now().Unix()
 	resp, err := c.Get(ts.URL)
