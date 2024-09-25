@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
+	flock "github.com/gofrs/flock"
 	"github.com/sethgrid/pester"
-	flock "github.com/theckman/go-flock"
 )
 
 type Logger interface {
