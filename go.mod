@@ -1,4 +1,4 @@
-module oreo
+module github.com/eroshan/oreo
 
 go 1.22.5
 

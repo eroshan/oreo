@@ -116,14 +116,6 @@ func (c *Client) WithTimeout(duration time.Duration) *Client {
 	return &cp
 }
 
-type BackoffStrategy int
-
-const (
-	CONSTANT_BACKOFF BackoffStrategy = iota
-	LINEAR_BACKOFF   BackoffStrategy = iota
-	NO_BACKOFF       BackoffStrategy = iota
-)
-
 func (c *Client) WithBackoff(backoff pester.BackoffStrategy) *Client {
 	cp := *c.clone()
 	cp.Backoff = backoff
