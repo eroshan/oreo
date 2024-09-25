@@ -32,6 +32,23 @@ var DefaultLogger Logger = &nullLogger{}
 type PreRequestCallback func(*http.Request) (*http.Request, error)
 type PostRequestCallback func(*http.Request, *http.Response) (*http.Response, error)
 
+// DefaultBackoff always returns 1 second
+var DefaultBackoff = pester.DefaultBackoff
+
+// ExponentialBackoff = pester.ExponentialBackoff returns ever increasing backoffs by a power of 2
+var ExponentialBackoff = pester.ExponentialBackoff
+
+// ExponentialJitterBackoff returns ever increasing backoffs by a power of 2
+// with +/- 0-33% to prevent sychronized reuqests.
+var ExponentialJitterBackoff = pester.ExponentialJitterBackoff
+
+// LinearBackoff returns increasing durations, each a second longer than the last
+var LinearBackoff = pester.LinearBackoff
+
+// LinearJitterBackoff returns increasing durations, each a second longer than the last
+// with +/- 0-33% to prevent sychronized reuqests.
+var LinearJitterBackoff = pester.LinearJitterBackoff
+
 type Client struct {
 	pester.Client
 
@@ -107,6 +124,12 @@ func (c *Client) WithRetries(retries int) *Client {
 	// pester MaxRetries is really a MaxAttempts, so if you
 	// want 2 retries that means 3 attempts
 	cp.MaxRetries = retries + 1
+	return &cp
+}
+
+func (c *Client) WithRetryOnHTTP429() *Client {
+	cp := *c.clone()
+	cp.SetRetryOnHTTP429(true)
 	return &cp
 }
 
